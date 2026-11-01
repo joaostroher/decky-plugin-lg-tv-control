@@ -2,6 +2,8 @@
 
 Control an LG webOS TV from the Steam Deck quick-access menu: discover, pair, wake, power off and select HDMI inputs. Optional suspend/resume automation requires a verified external display.
 
+**100% vibe coded.** This project was built entirely through AI-assisted coding, with human direction and hardware testing.
+
 **Version 0.1.9 — experimental.** Manual wake, power-off and HDMI 1 selection have been confirmed on a real LG TV during development. Suspend/resume automation on a physical Deck is still under investigation. The original requirements and hardware acceptance checklist remain in [docs/SPECIFICATION.md](docs/SPECIFICATION.md).
 
 ## Install and configure
