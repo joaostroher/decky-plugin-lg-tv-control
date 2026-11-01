@@ -4,18 +4,18 @@ Control an LG webOS TV from the Steam Deck quick-access menu: discover, pair, wa
 
 **100% vibe coded.** This project was built entirely through AI-assisted coding, with human direction and hardware testing.
 
-**Version 0.1.9 — experimental.** Manual wake, power-off and HDMI 1 selection have been confirmed on a real LG TV during development. Suspend/resume automation on a physical Deck is still under investigation. The original requirements and hardware acceptance checklist remain in [docs/SPECIFICATION.md](docs/SPECIFICATION.md).
+**Version 0.1.10 — experimental.** Manual wake, power-off and HDMI 1 selection have been confirmed on a real LG TV during development. Suspend/resume automation on a physical Deck is still under investigation. The original requirements and hardware acceptance checklist remain in [docs/SPECIFICATION.md](docs/SPECIFICATION.md).
 
 ## Install and configure
 
-1. Install Decky Loader, then install `out/lg-tv-control-v0.1.9.zip` through **Decky settings → Developer → Install Plugin from ZIP File**. The ZIP includes Python dependencies; do not run pip on the Deck.
+1. Install Decky Loader, then install `out/lg-tv-control-v0.1.10.zip` through **Decky settings → Developer → Install Plugin from ZIP File**. The ZIP includes Python dependencies; do not run pip on the Deck.
 2. Alternatively, extract its single `lg-tv-control` folder into `~/homebrew/plugins/` in Desktop Mode and reload Decky. Avoid nesting it inside another folder with the same name.
 3. Enable network control/LG Connect Apps and network wake on the TV. Settings such as **TV On With Mobile** or **Turn on via Wi-Fi** vary by model. Put the TV and Deck on a reachable LAN without client isolation.
 4. Open **LG TV Control → Find TVs on the network**, then select an address in the list. Cancel leaves the current address unchanged. Closing the dialog restores the Decky panel and preserves your fields. You can also enter an IPv4 address or hostname manually.
 5. Check the detected MAC address, select the Deck HDMI input and **Save settings**. Use the MAC for the TV's active network interface. A DHCP reservation helps keep the IP stable.
 6. With the TV on, choose **Pair / authorize TV** and accept the on-screen request within 35 seconds. Use **Test connection** and the manual controls to check access.
 7. Connect the Deck to the TV, select the Deck input on the TV and choose the matching connector under **Bind the TV display**. Confirm that this display belongs to the configured TV.
-8. Before testing automation, check that **External display** shows **Verified**, **Suspend / resume** shows **Active**, and **TV sleep connection** shows **Ready** while the TV is reachable.
+8. Before testing automation in Gaming Mode, check that **External display** shows **Verified**, **Suspend / resume** shows **Active**, **Steam sleep event** shows **Registered**, and **TV sleep connection** shows **Ready** while the TV is reachable.
 
 Actions appear first in the panel, followed by a separate **Status** section. It shows pairing, recently checked TV power, external display identity, suspend/resume integration and the last automation event. A confirmed power reading expires after 15 seconds. An unanswered request or a wake packet never proves that the TV is on or off.
 
@@ -49,7 +49,9 @@ Detection works best with the TV on and on the same local link. Wi-Fi isolation,
 - While the Deck is awake, paired and docked with power-off on suspend enabled, the backend prepares an authenticated TV connection and tests the active-input query in advance. This avoids spending the short suspend window on a fresh TCP/TLS/SSAP handshake and the first input query. The query result is not cached: suspend reads the current input again. Preparation sends no power, wake or HDMI command. It retries at most every five seconds, closes on undocking/configuration changes and is cleaned up on suspend/unload.
 - Suspend reuses that connection when available, otherwise makes one bounded connection attempt. It uses a snapshot captured before `PrepareForSleep`, reads the active TV app and checks the display again before power-off. Another input/app, an unknown response or a timeout leaves the TV on.
 - TV operations are serialized. Suspend cancels pending resume work; duplicate signals are coalesced. Loading the plugin does not issue automatic TV commands.
+- In Gaming Mode, the plugin registers `SteamClient.System.RegisterForOnSuspendRequest` for the entire plugin lifetime, including while the panel is closed. It starts the same bounded power-off operation from Steam's sleep request, aiming to finish before network shutdown. The later logind signal awaits that operation rather than starting another or releasing the inhibitor early. The input is still read live; preparation never authorizes power-off from a cached input.
 - The Python backend listens to systemd-logind over D-Bus, even with the panel closed. A **delay** inhibitor is released before sleep. The deadline is at most two seconds, reduced according to `InhibitDelayMaxUSec`; the power-off operation also has a 1.5-second limit.
+- The Steam callback is an advisory notification, not an API that waits for the plugin. Its timing must be validated on the installed Steam client. If unavailable, the logind path remains, but NetworkManager can begin disconnecting on the same `PrepareForSleep` signal, so a logind inhibitor alone cannot guarantee network availability. If no system sleep follows a Steam request within five seconds, the plugin restores its normal controls. A TV already powered off by a canceled sleep request can be woken manually.
 - No privileged services or system hooks are installed, and the read-only SteamOS partition is not changed.
 - If D-Bus/logind or its permissions fail, suspend/resume automation is disabled and the panel shows the failed stage and reason. Manual controls and the independent display-connection option remain available.
 
@@ -60,6 +62,8 @@ If **Suspend / resume** shows **Unavailable**, read the detail below it. The dia
 Install the full ZIP, including `py_modules`, then choose **Recheck suspend automation**. Share the exact new status if it remains unavailable. For a TV that stays on during sleep, check **Last suspend** after resuming; this result is preserved separately from resume activity. It identifies disabled settings, missing pairing, stale display state, another HDMI/app, connection/read failures and the phase of a timeout. The same safe result is logged. **TV sleep connection: Ready** confirms that connection setup has already finished, without asserting that a later command will succeed. If loading fails, the diagnostic distinguishes a missing bundled package (such as `dbus_next`) from a missing Python runtime module (such as `xml`) and names the module. Identify the cause before changing system permissions or running anything as root. Manual TV controls remain available.
 
 HDMI switching requests the webOS `LAUNCH` permission. The test TV returned `401 insufficient permissions` without it and accepted `tv/switchInput` with it using the existing pairing. Permission errors now explain that authorization needs renewal.
+
+If power-off times out while reading the active input, first check **Steam sleep event**. **Registered** confirms the callback was installed; **Last suspend** starts with `Steam request:` if its RPC reached the backend first, or `systemd-logind:` if the system signal arrived first. This distinguishes a missing/late Steam notification from a TV read or network timing failure. Increasing the resume timeout does not change the suspend deadline. A manual **Test connection** while awake can check input-query access independently.
 
 ## Settings and credentials
 
@@ -105,12 +109,13 @@ python3 -m venv .venv
 python -m pip install -r requirements.txt
 pnpm typecheck
 pnpm typecheck:local
+pnpm test:frontend
 python -m unittest discover -s tests -v
 pnpm build
 python scripts/package.py
 ```
 
-Without Corepack, replace `pnpm` with `npx --yes pnpm@9.15.9`. The packager downloads pinned Python wheels from `requirements.txt`, preserves dependency licenses/metadata in `py_modules/` and creates `out/lg-tv-control-v0.1.9.zip`. Network access is needed during dependency installation/build. The ZIP has a single `lg-tv-control/` folder containing metadata, `main.py`, `dist/index.js`, backend code, dependencies and the license.
+Without Corepack, replace `pnpm` with `npx --yes pnpm@9.15.9`. The packager downloads pinned Python wheels from `requirements.txt`, preserves dependency licenses/metadata in `py_modules/` and creates `out/lg-tv-control-v0.1.10.zip`. Network access is needed during dependency installation/build. The ZIP has a single `lg-tv-control/` folder containing metadata, `main.py`, `dist/index.js`, backend code, dependencies and the license.
 
 CI runs type checks, backend/protocol tests, browser and Decky builds, and packaging. Tests exercise display gates, credentials, SSAP commands, Wake-on-LAN, logind signals and inhibitor cleanup. When dbus-daemon is installed, an isolated real bus also tests Unix file descriptor passing. The pinned dbus-next 0.2.3 bundle has a small compatibility patch: XML imports and their type annotations are deferred until XML introspection is requested. The raw D-Bus calls used by this plugin do not require XML, which some frozen Decky runtimes omit. The patch is applied by `scripts/bundle_dependencies.py`, preserves dependency licenses, and is checked against the pinned source. Packaging validates dependency imports with host site-packages and XML disabled. Integration tests repeat real D-Bus calls, FD passing and sleep signals in that isolated environment; a bootstrap test also checks renamed install folders. Tests do not replace physical hardware validation. Store publication requires the Decky submission/review process.
 
@@ -133,5 +138,7 @@ Based on the [official Decky template](https://github.com/SteamDeckHomebrew/deck
 - [Decky documentation](https://wiki.deckbrew.xyz/en/plugin-dev/getting-started): structure, metadata and backend. Some wiki examples use the legacy API; this frontend follows the current template with `@decky/api`, `@decky/ui` and API v1.
 - [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader): lifecycle, private directories and `py_modules` loading.
 - [systemd-logind](https://www.freedesktop.org/software/systemd/man/latest/org.freedesktop.login1.html): sleep signals, inhibitors and deadlines.
+- [Decky Steam system types](https://github.com/SteamDeckHomebrew/decky-frontend-lib/blob/main/src/globals/steam-client/system/index.ts): Steam sleep request registration.
+- [NetworkManager power monitor](https://github.com/NetworkManager/NetworkManager/blob/main/src/core/nm-power-monitor.c): networking also reacts to logind's sleep preparation signal.
 - [aiowebostv](https://github.com/home-assistant-libs/aiowebostv): SSAP registration and endpoint reference; not bundled. Its current version requires Python 3.12+ and aiohttp; this plugin uses a small adapter over websockets.
 - [lgctl](https://github.com/lmrisdal/lgctl): evaluated as an alternative; not bundled. The consulted checkout had no license file and used a Go CLI with its own systemd services. The Python approach avoids an architecture-specific executable and privileged service installation.

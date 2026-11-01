@@ -18,6 +18,7 @@ class Automation:
         self.resume_task = None
         self.suspend_handled = False
         self.last_suspend_event = ""
+        self.suspend_source = "systemd-logind"
         self.suspend_stage = "idle"
         self.logger = None
         self._prepare_task = None
@@ -40,6 +41,7 @@ class Automation:
         return "not_ready"
 
     def record_suspend(self, message):
+        message = f"{self.suspend_source}: {message}"
         self.last_suspend_event = message
         self.last_event = message
         if self.logger:

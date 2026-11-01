@@ -21,6 +21,7 @@ jobs:
       - run: python -m pip install -r requirements.txt
       - run: pnpm typecheck
       - run: pnpm typecheck:local
+      - run: pnpm test:frontend
       - run: python -m unittest discover -s tests -v
       - run: pnpm build
       - run: pnpm build:local

@@ -36,6 +36,60 @@ class Lifecycle:
         self.error = None
         self.logger = None
         self.state = "starting"
+        self.system_sleeping = False
+        self.suspend_task = None
+        self.request_watchdog = None
+        self.request_timeout = 5
+
+    def _start_suspend(self, source):
+        # Steam and logind may announce the same sleep while work is in flight.
+        # Both must await the same bounded task before releasing the inhibitor.
+        if self.suspend_task is None:
+            self.automation.sleeping = True
+            self.automation.cancel_resume()
+            self.automation.suspend_source = source
+            self.automation.last_suspend_event = f"{source}: Suspend request received."
+            self.suspend_task = asyncio.create_task(self._perform_suspend())
+        return self.suspend_task
+
+    async def _perform_suspend(self):
+        try:
+            async with asyncio.timeout(self.budget):
+                await self.automation.suspend()
+        except TimeoutError:
+            stage = getattr(self.automation, "suspend_stage", "handling the suspend request")
+            source = self.automation.suspend_source
+            message = f"{source}: Suspend deadline reached while {stage}; no retry."
+            self.automation.last_event = message
+            self.automation.last_suspend_event = message
+
+    async def steam_suspend(self):
+        if self.state != "active" or self.fd is None:
+            return False
+        task = self._start_suspend("Steam request")
+        if not self.system_sleeping and self.request_watchdog is None:
+            self.request_watchdog = asyncio.create_task(self._expire_request())
+        # An interrupted frontend RPC must not orphan work. The task has its own
+        # deadline and is also cancelled on lifecycle teardown.
+        await asyncio.shield(task)
+        return True
+
+    async def _expire_request(self):
+        await asyncio.sleep(self.request_timeout)
+        if not self.system_sleeping:
+            await self._reset_suspend()
+            self.automation.last_event = "Steam suspend request was not followed by system sleep; controls restored."
+
+    async def _reset_suspend(self):
+        current = asyncio.current_task()
+        tasks = [task for task in (self.suspend_task, self.request_watchdog)
+                 if task and task is not current]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self.suspend_task = self.request_watchdog = None
+        self.automation.sleeping = False
+        self.automation.suspend_handled = False
 
     async def call(self, message):
         async with asyncio.timeout(3):
@@ -84,11 +138,13 @@ class Lifecycle:
                     if self.last_signal == sleeping:
                         return
                     self.last_signal = sleeping
+                    self.system_sleeping = sleeping
                     # Cancel wake work synchronously as soon as sleep is announced.
                     if sleeping:
                         self.automation.sleeping = True
                         self.automation.cancel_resume()
-                        self.automation.last_suspend_event = "Suspend request received."
+                        if self.suspend_task is None:
+                            self.automation.last_suspend_event = "systemd-logind: Suspend request received."
                     self.events.put_nowait(sleeping)
 
             self.bus.add_message_handler(handler)
@@ -120,14 +176,8 @@ class Lifecycle:
                     sleeping = self.events.get_nowait()
                 if sleeping:
                     try:
-                        async with asyncio.timeout(self.budget):
-                            if self.fd is not None:
-                                await self.automation.suspend()
-                    except TimeoutError:
-                        stage = getattr(self.automation, "suspend_stage", "handling the suspend request")
-                        message = f"Suspend deadline reached while {stage}; no retry."
-                        self.automation.last_event = message
-                        self.automation.last_suspend_event = message
+                        if self.fd is not None:
+                            await self._start_suspend("systemd-logind")
                     finally:
                         self.release()
                 else:
@@ -135,8 +185,7 @@ class Lifecycle:
                     self.stage = "renew inhibitor after resume"
                     await self.inhibit()
                     self.stage = "wait for sleep events"
-                    self.automation.sleeping = False
-                    self.automation.suspend_handled = False
+                    await self._reset_suspend()
                     self.automation.start_resume()
         except asyncio.CancelledError:
             raise
@@ -169,6 +218,7 @@ class Lifecycle:
             if self.logger:
                 self.logger.error("Lifecycle unavailable: stage=%s reason=%s type=%s", self.stage, reason, type(error).__name__)
         finally:
+            await self._reset_suspend()
             for task in (disconnected, event_task):
                 if task:
                     task.cancel()

@@ -16,6 +16,15 @@ from backend.lifecycle import Lifecycle
 
 
 class Plugin(Controller):
+    async def set_steam_suspend_hook(self, enabled):
+        self.steam_suspend_hook = enabled is True
+        return {"ok": True}
+
+    async def steam_suspend_request(self):
+        handled = await self.lifecycle.steam_suspend()
+        return {"ok": handled, "message": self.automation.last_suspend_event if handled
+                else "Steam sleep request ignored: suspend integration is not ready."}
+
     async def _main(self):
         self._configure(Settings(decky.DECKY_PLUGIN_SETTINGS_DIR))
         self.lifecycle.logger = decky.logger

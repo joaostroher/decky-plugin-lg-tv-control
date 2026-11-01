@@ -1,6 +1,6 @@
 {
   "name": "lg-tv-control",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "LG webOS TV controls and display-gated Steam Deck power automation",
   "type": "module",
   "license": "BSD-3-Clause",
@@ -10,6 +10,7 @@
     "watch": "rollup -c -w",
     "typecheck": "tsc --noEmit",
     "test": "python3 -m unittest discover -s tests -v",
+    "test:frontend": "node --test tests/test_sleep_hook.mjs",
     "package": "pnpm build && python3 scripts/package.py",
     "dev": "node scripts/dev.mjs",
     "dev:backend": "python3 scripts/local_server.py",

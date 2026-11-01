@@ -3,8 +3,13 @@ import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager
+import time
 
 from backend.lifecycle import Lifecycle
+from backend.automation import Automation
+from backend.display import Display, Snapshot
+from backend.settings import DEFAULTS
 
 
 class FakeBus:
@@ -132,6 +137,115 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
         self.assertIsNone(self.lifecycle.fd)
         self.assertIn("Active", self.lifecycle.status)
+
+    async def test_steam_and_logind_share_work_and_hold_inhibitor_until_done(self):
+        started, finish = asyncio.Event(), asyncio.Event()
+
+        async def slow():
+            started.set()
+            await finish.wait()
+            self.automation.last_suspend_event = "Steam request: command accepted."
+
+        self.automation.suspend.side_effect = slow
+        request = asyncio.create_task(self.lifecycle.steam_suspend())
+        await asyncio.wait_for(started.wait(), 1)
+        self.bus.signal(True)
+        await asyncio.sleep(0.02)
+        self.assertIsNotNone(self.lifecycle.fd)
+        self.automation.suspend.assert_awaited_once()
+        finish.set()
+        self.assertTrue(await request)
+        await asyncio.sleep(0.02)
+        self.assertIsNone(self.lifecycle.fd)
+        self.assertEqual(self.automation.last_suspend_event, "Steam request: command accepted.")
+
+    async def test_cancelled_frontend_rpc_does_not_orphan_suspend_task(self):
+        started, finish = asyncio.Event(), asyncio.Event()
+
+        async def slow():
+            started.set()
+            await finish.wait()
+
+        self.automation.suspend.side_effect = slow
+        request = asyncio.create_task(self.lifecycle.steam_suspend())
+        await asyncio.wait_for(started.wait(), 1)
+        request.cancel()
+        await asyncio.gather(request, return_exceptions=True)
+        self.assertFalse(self.lifecycle.suspend_task.done())
+        self.bus.signal(True)
+        finish.set()
+        await asyncio.sleep(0.02)
+        self.assertIsNone(self.lifecycle.fd)
+        self.automation.suspend.assert_awaited_once()
+
+    async def test_unconfirmed_steam_request_expires_and_restores_controls(self):
+        self.lifecycle.request_timeout = 0.03
+        await self.lifecycle.steam_suspend()
+        self.assertTrue(self.automation.sleeping)
+        await asyncio.sleep(0.05)
+        self.assertFalse(self.automation.sleeping)
+        self.assertIsNone(self.lifecycle.suspend_task)
+        self.assertIsNotNone(self.lifecycle.fd)
+        self.assertIn("controls restored", self.automation.last_event)
+        await self.lifecycle.steam_suspend()
+        self.assertEqual(self.automation.suspend.await_count, 2)
+
+    async def test_confirmed_sleep_does_not_expire_before_resume(self):
+        self.lifecycle.request_timeout = 0.03
+        await self.lifecycle.steam_suspend()
+        self.bus.signal(True)
+        await asyncio.sleep(0.05)
+        self.assertTrue(self.automation.sleeping)
+        self.bus.signal(False)
+        await asyncio.sleep(0.02)
+        self.assertFalse(self.automation.sleeping)
+        self.assertIsNone(self.lifecycle.suspend_task)
+        self.assertIsNone(self.lifecycle.request_watchdog)
+
+    async def test_steam_request_requires_active_inhibitor(self):
+        self.lifecycle.release()
+        self.assertFalse(await self.lifecycle.steam_suspend())
+        self.automation.suspend.assert_not_awaited()
+
+    def install_real_automation(self, app="com.webos.app.hdmi1"):
+        tv = SimpleNamespace(active_input=AsyncMock(return_value=app), power_off=AsyncMock())
+
+        @asynccontextmanager
+        async def session(*_args):
+            yield tv
+
+        tv.session = session
+        settings = SimpleNamespace(values={**DEFAULTS, "host": "tv.local", "display_id": "test-display"}, key="test-key")
+        snapshot = lambda: Snapshot(time.monotonic(), [Display("card0-HDMI-A-1", "connected", "test-display")])
+        automation = Automation(settings, tv, snapshot)
+        automation.snapshot = snapshot()
+        self.lifecycle.automation = self.automation = automation
+        return tv
+
+    async def test_early_request_finishes_before_network_stops_on_logind_event(self):
+        tv = self.install_real_automation()
+        await self.automation._maintain_prepared(True)
+        await self.automation._prepare_task
+        self.assertTrue(await self.lifecycle.steam_suspend())
+        tv.power_off.assert_awaited_once()
+        reads = tv.active_input.await_count
+        # Model the reported failure: no request can complete after PrepareForSleep.
+        tv.active_input.side_effect = TimeoutError
+        self.bus.signal(True)
+        await asyncio.sleep(0.02)
+        self.assertIsNone(self.lifecycle.fd)
+        self.assertEqual(tv.active_input.await_count, reads)
+        tv.power_off.assert_awaited_once()
+        self.assertIn("Steam request: Power-off command accepted", self.automation.last_suspend_event)
+
+    async def test_early_request_still_reads_current_input_after_preparation(self):
+        tv = self.install_real_automation()
+        await self.automation._maintain_prepared(True)
+        await self.automation._prepare_task
+        tv.active_input.return_value = "netflix"
+        await self.lifecycle.steam_suspend()
+        tv.power_off.assert_not_awaited()
+        self.assertIn("another input/app", self.automation.last_suspend_event)
 
     async def test_permission_denied_diagnoses_the_failed_stage(self):
         self.bus.signal(True)

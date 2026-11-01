@@ -18,6 +18,7 @@ class Controller:
         self.lifecycle = Lifecycle(self.automation)
         self.power_state = "unknown"
         self.power_checked_at = 0
+        self.steam_suspend_hook = False
 
     async def get_state(self):
         snapshot = scan()
@@ -28,6 +29,7 @@ class Controller:
                     last_event=self.automation.last_event,
                     last_suspend_event=self.automation.last_suspend_event,
                     suspend_connection=self.automation.suspend_connection(),
+                    steam_suspend_hook=self.steam_suspend_hook,
                     diagnostics={"python": platform.python_version(), "lifecycle": self.lifecycle.error})
 
     async def retry_automation(self):

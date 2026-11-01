@@ -4,6 +4,7 @@ import { ButtonItem, ConfirmModal, DialogBodyText, DialogButton, DialogControlsS
 import { callable, definePlugin, toaster } from "@decky/api";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { FaTv } from "react-icons/fa";
+import { registerSleepHook, type SleepSystem } from "./sleep-hook";
 
 type Settings = {
   host: string; mac: string; hdmi: string; broadcast: string; secure: boolean;
@@ -18,6 +19,7 @@ type State = {
   tv_power?: "on" | "unknown";
   last_suspend_event?: string;
   suspend_connection?: "ready" | "connecting" | "not_ready";
+  steam_suspend_hook?: boolean;
 };
 type Result = { ok: boolean; message: string };
 const getState = callable<[], State>("get_state");
@@ -27,6 +29,8 @@ const bind = callable<[identity: string], Result>("bind_display");
 const discover = callable<[], string[]>("discover_tvs");
 const detectMac = callable<[host: string], Result & { mac: string | null; pairing_required: boolean }>("detect_tv_mac");
 const retryAutomation = callable<[], Result>("retry_automation");
+const steamSuspend = callable<[], Result>("steam_suspend_request");
+const reportSleepHook = callable<[active: boolean], { ok: boolean }>("set_steam_suspend_hook");
 
 function StatusItem({ label, value, tone, detail }: {
   label: string; value: string; tone: "good" | "warning" | "muted"; detail?: string;
@@ -63,6 +67,11 @@ function TVStatus({ state, message }: { state: State; message: string }) {
         <StatusItem label="Suspend / resume" value={lifecycleLabels[lifecycle]}
           tone={lifecycle === "active" ? "good" : lifecycle === "unavailable" ? "warning" : "muted"}
           detail={state.lifecycle} />
+        {lifecycle === "active" && <StatusItem label="Steam sleep event"
+          value={state.steam_suspend_hook ? "Registered" : "Unavailable"}
+          tone={state.steam_suspend_hook ? "good" : "warning"}
+          detail={state.steam_suspend_hook ? "Power-off starts from Steam's sleep request, with the panel open or closed."
+            : "Only the system sleep event is available; networking may stop before TV commands complete."} />}
         {lifecycle === "active" && state.settings.off_on_suspend && <StatusItem
           label="TV sleep connection" value={state.suspend_connection === "ready" ? "Ready" : state.suspend_connection === "connecting" ? "Connecting" : "Not ready"}
           tone={state.suspend_connection === "ready" ? "good" : "muted"}
@@ -315,11 +324,16 @@ function Content() {
   </>;
 }
 
-export default definePlugin(() => ({
-  name: "LG TV Control",
-  // Steam hides the QAM when opening a modal; keep the draft and callbacks alive.
-  alwaysRender: true,
-  titleView: <div className={staticClasses.Title}>LG TV Control</div>,
-  content: <Content />,
-  icon: <FaTv />,
-}));
+export default definePlugin(() => {
+  const system = (globalThis as typeof globalThis & { SteamClient?: { System?: SleepSystem } }).SteamClient?.System;
+  const disposeSleepHook = system ? registerSleepHook(system, steamSuspend, reportSleepHook) : () => {};
+  return {
+    name: "LG TV Control",
+    // Steam hides the QAM when opening a modal; keep the draft and callbacks alive.
+    alwaysRender: true,
+    titleView: <div className={staticClasses.Title}>LG TV Control</div>,
+    content: <Content />,
+    icon: <FaTv />,
+    onDismount: disposeSleepHook,
+  };
+});
