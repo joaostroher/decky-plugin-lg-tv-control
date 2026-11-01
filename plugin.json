@@ -1,0 +1,10 @@
+{
+  "name": "LG TV Control",
+  "author": "joaostroher",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["utility", "tv", "webos"],
+    "description": "Control an LG webOS TV with safe external-display power automation."
+  }
+}

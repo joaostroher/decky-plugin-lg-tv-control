@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "baseUrl": "..",
+    "paths": { "@decky/ui": ["dev/decky-ui.tsx"], "@decky/api": ["dev/decky-api.ts"] }
+  },
+  "include": ["../src", "./*.tsx", "./*.ts"],
+  "exclude": ["../node_modules"]
+}

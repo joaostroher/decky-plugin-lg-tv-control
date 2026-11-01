@@ -1,0 +1,22 @@
+node_modules/
+dist/
+out/
+py_modules/
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+.local-state/
+
+# Local secrets, logs and editor settings must never be published.
+.env
+.env.*
+!.env.example
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
+.ssh/
+.idea/
+.vscode/
