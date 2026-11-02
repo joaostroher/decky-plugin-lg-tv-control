@@ -4,7 +4,7 @@ import { ButtonItem, ConfirmModal, DialogBodyText, DialogButton, DialogControlsS
 import { callable, definePlugin, toaster } from "@decky/api";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { FaTv } from "react-icons/fa";
-import { registerSleepHook, type SleepSystem, type SleepHookReason } from "./sleep-hook";
+import { registerSleepHook, resolveSleepEvents, type SteamHost, type SleepHookReason } from "./sleep-hook";
 
 type Settings = {
   host: string; mac: string; hdmi: string; broadcast: string; secure: boolean;
@@ -325,15 +325,20 @@ function Content() {
 }
 
 export default definePlugin(() => {
-  const getSystem = () => {
-    const main = (globalThis as typeof globalThis & { SteamClient?: { System?: SleepSystem } }).SteamClient?.System;
-    let sp: SleepSystem | undefined;
+  const getHosts = (): SteamHost[] => {
+    const hosts: SteamHost[] = [globalThis as typeof globalThis & SteamHost];
     try {
-      sp = (findSP() as (Window & { SteamClient?: { System?: SleepSystem } }) | undefined)?.SteamClient?.System;
+      const sp = findSP() as (Window & SteamHost) | undefined;
+      if (sp) hosts.push(sp);
     } catch { /* The SP window can be created later. */ }
-    return [main, sp].find(system => typeof system?.RegisterForOnSuspendRequest === "function") ?? main ?? sp;
+    return hosts;
   };
-  const disposeSleepHook = registerSleepHook(getSystem, steamSuspend, reportSleepHook);
+  const getSystem = () => resolveSleepEvents(getHosts());
+  const isSuspending = () => {
+    const states = getHosts().map(host => host.SuspendResumeStore?.suspending);
+    return states.includes(true) ? true : states.includes(false) ? false : undefined;
+  };
+  const disposeSleepHook = registerSleepHook(getSystem, steamSuspend, reportSleepHook, undefined, isSuspending);
   return {
     name: "LG TV Control",
     // Steam hides the QAM when opening a modal; keep the draft and callbacks alive.

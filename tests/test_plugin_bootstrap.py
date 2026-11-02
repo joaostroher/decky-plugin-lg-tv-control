@@ -48,11 +48,13 @@ async def check():
         assert (await plugin.set_steam_suspend_hook(False, "missing_event"))["ok"]
         state = await plugin.get_state()
         assert not state["steam_suspend_hook"]
-        assert "RegisterForOnSuspendRequest is missing" in state["steam_suspend_hook_detail"]
+        assert "Neither System.RegisterForOnSuspendRequest" in state["steam_suspend_hook_detail"]
         assert not (await plugin.set_steam_suspend_hook(False, "private arbitrary content"))["ok"]
         assert "private arbitrary content" not in str(await plugin.get_state())
         assert (await plugin.set_steam_suspend_hook(True, "registered"))["ok"]
         assert (await plugin.get_state())["steam_suspend_hook"]
+        assert (await plugin.set_steam_suspend_hook(True, "registered_user_progress"))["ok"]
+        assert "User suspend preparation" in (await plugin.get_state())["steam_suspend_hook_detail"]
     finally:
         await plugin._unload()
 asyncio.run(check())

@@ -19,8 +19,9 @@ class Plugin(Controller):
     async def set_steam_suspend_hook(self, enabled, reason="registered"):
         details = {
             "registered": "Steam sleep callback registered. Power-off still requires live input and display checks.",
-            "missing_client": "Steam System API is not available in the loader or SP window. Retrying every two seconds.",
-            "missing_event": "Steam System API is present, but RegisterForOnSuspendRequest is missing. Retrying every two seconds.",
+            "registered_user_progress": "Registered through Steam User suspend preparation progress. Power-off starts after preparation completes and still requires live input and display checks.",
+            "missing_client": "Steam sleep API is not available in the loader or SP window. Retrying every two seconds.",
+            "missing_event": "Neither System.RegisterForOnSuspendRequest nor User.RegisterForPrepareForSystemSuspendProgress is available. Retrying every two seconds.",
             "register_failed": "Steam sleep-event registration failed. Retrying every two seconds.",
             "invalid_handle": "Steam returned no supported registration handle. Waiting for an event to confirm the listener; not registering duplicates.",
             "stopped": "Frontend sleep listener was unloaded.",

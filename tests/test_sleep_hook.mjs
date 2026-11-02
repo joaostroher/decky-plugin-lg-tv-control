@@ -7,9 +7,99 @@ const source = readFileSync(new URL("../src/sleep-hook.ts", import.meta.url), "u
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 },
 });
-const { registerSleepHook } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
+const { registerSleepHook, resolveSleepEvents } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const noTimer = () => () => {};
+
+test("a present System API without the old event does not mask User events in either window", () => {
+  const current = { RegisterForPrepareForSystemSuspendProgress() {} };
+  const legacy = { RegisterForOnSuspendRequest() {} };
+  assert.equal(resolveSleepEvents([{ SteamClient: { System: {}, User: current } }]), current);
+  assert.equal(resolveSleepEvents([{ SteamClient: { System: {} } }, { SteamClient: { User: current } }]), current);
+  assert.equal(resolveSleepEvents([{ SteamClient: { User: current } }, { SteamClient: { System: legacy } }]), legacy);
+});
+
+test("current Steam User API works when the System event is missing", async () => {
+  let progress;
+  let calls = 0;
+  let removed = 0;
+  let suspending = false;
+  const reports = [];
+  const dispose = registerSleepHook({ RegisterForPrepareForSystemSuspendProgress(listener) {
+    progress = listener;
+    listener({ state: 1 }); // A synchronous initial snapshot must not power off.
+    return { unregister() { removed++; } };
+  } }, async () => { calls++; }, async (...args) => { reports.push(args); }, noTimer, () => suspending);
+  await flush();
+  assert.deepEqual(reports[0], [true, "registered_user_progress"]);
+  progress({ state: 1 }); // An asynchronously replayed idle snapshot is also ignored.
+  progress({ state: 0 });
+  progress({ state: 3 }); // Login progress is not a suspend request.
+  assert.equal(calls, 0);
+  suspending = true;
+  progress({ state: 1 }); // No game running: preparation can finish without intermediate events.
+  assert.equal(calls, 1);
+  dispose();
+  progress({ state: 1 });
+  assert.equal(calls, 1);
+  assert.equal(removed, 1);
+});
+
+test("User progress requires a preparation cycle when Steam's live suspend flag is unknown", async () => {
+  let progress;
+  let calls = 0;
+  const dispose = registerSleepHook({ RegisterForPrepareForSystemSuspendProgress(listener) {
+    progress = listener;
+    return { unregister() {} };
+  } }, async () => { calls++; }, async () => {}, noTimer);
+  await flush();
+  progress({ state: 1 });
+  progress({ state: "1" });
+  progress({ state: 99 });
+  progress(null);
+  assert.equal(calls, 0);
+  progress({ state: 2 }); // Cloud sync in progress: wait for preparation to finish.
+  progress({ state: 4 });
+  assert.equal(calls, 0);
+  progress({ state: 1 });
+  assert.equal(calls, 1);
+  progress({ state: 1 }); // A repeated completed snapshot does not start another cycle.
+  assert.equal(calls, 1);
+  progress({ state: 5 });
+  progress({ state: 0 }); // Invalid/reset cancels the observed cycle.
+  progress({ state: 1 });
+  assert.equal(calls, 1);
+  dispose();
+});
+
+test("a cancelled User preparation cannot trigger power-off", async () => {
+  let progress;
+  let suspending = true;
+  let calls = 0;
+  const dispose = registerSleepHook({ RegisterForPrepareForSystemSuspendProgress(listener) {
+    progress = listener;
+    return { unregister() {} };
+  } }, async () => { calls++; }, async () => {}, noTimer, () => suspending);
+  await flush();
+  progress({ state: 5 });
+  suspending = false;
+  progress({ state: 1 });
+  assert.equal(calls, 0);
+  dispose();
+});
+
+test("the legacy System listener remains preferred when both APIs exist", async () => {
+  let legacyRegistrations = 0;
+  let progressRegistrations = 0;
+  const dispose = registerSleepHook({
+    RegisterForOnSuspendRequest() { legacyRegistrations++; return { unregister() {} }; },
+    RegisterForPrepareForSystemSuspendProgress() { progressRegistrations++; return { unregister() {} }; },
+  }, async () => {}, async () => {}, noTimer);
+  await flush();
+  assert.equal(legacyRegistrations, 1);
+  assert.equal(progressRegistrations, 0);
+  dispose();
+});
 
 test("Steam request reaches backend without mounting the panel; unload removes listener", async () => {
   let callback;
