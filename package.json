@@ -1,6 +1,6 @@
 {
   "name": "lg-tv-control",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "LG webOS TV controls and display-gated Steam Deck power automation",
   "type": "module",
   "license": "BSD-3-Clause",

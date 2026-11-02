@@ -19,6 +19,7 @@ class Controller:
         self.power_state = "unknown"
         self.power_checked_at = 0
         self.steam_suspend_hook = False
+        self.steam_suspend_hook_detail = "No frontend sleep-event status received yet. Reload the plugin if this persists."
 
     async def get_state(self):
         snapshot = scan()
@@ -30,6 +31,7 @@ class Controller:
                     last_suspend_event=self.automation.last_suspend_event,
                     suspend_connection=self.automation.suspend_connection(),
                     steam_suspend_hook=self.steam_suspend_hook,
+                    steam_suspend_hook_detail=self.steam_suspend_hook_detail,
                     diagnostics={"python": platform.python_version(), "lifecycle": self.lifecycle.error})
 
     async def retry_automation(self):

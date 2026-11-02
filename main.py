@@ -16,8 +16,22 @@ from backend.lifecycle import Lifecycle
 
 
 class Plugin(Controller):
-    async def set_steam_suspend_hook(self, enabled):
+    async def set_steam_suspend_hook(self, enabled, reason="registered"):
+        details = {
+            "registered": "Steam sleep callback registered. Power-off still requires live input and display checks.",
+            "missing_client": "Steam System API is not available in the loader or SP window. Retrying every two seconds.",
+            "missing_event": "Steam System API is present, but RegisterForOnSuspendRequest is missing. Retrying every two seconds.",
+            "register_failed": "Steam sleep-event registration failed. Retrying every two seconds.",
+            "invalid_handle": "Steam returned no supported registration handle. Waiting for an event to confirm the listener; not registering duplicates.",
+            "stopped": "Frontend sleep listener was unloaded.",
+        }
+        if type(enabled) is not bool or not isinstance(reason, str) or reason not in details:
+            return {"ok": False}
         self.steam_suspend_hook = enabled is True
+        detail = details[reason]
+        if self.steam_suspend_hook_detail != detail:
+            decky.logger.info("Steam sleep listener: %s", reason)
+        self.steam_suspend_hook_detail = detail
         return {"ok": True}
 
     async def steam_suspend_request(self):

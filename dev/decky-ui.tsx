@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 
 type Common = { children?: ReactNode; style?: CSSProperties; className?: string };
 export const staticClasses = { Title: "plugin-title" };
+export const findSP = (): Window | undefined => undefined;
 export const QuickAccessTab = { Decky: 999 };
 export const Navigation = { OpenQuickAccessMenu(_tab: number) {} };
 export const PanelSection = ({ title, children }: Common & { title?: string }) =>

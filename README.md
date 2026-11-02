@@ -4,11 +4,11 @@ Control an LG webOS TV from the Steam Deck quick-access menu: discover, pair, wa
 
 **100% vibe coded.** This project was built entirely through AI-assisted coding, with human direction and hardware testing.
 
-**Version 0.1.10 — experimental.** Manual wake, power-off and HDMI 1 selection have been confirmed on a real LG TV during development. Suspend/resume automation on a physical Deck is still under investigation. The original requirements and hardware acceptance checklist remain in [docs/SPECIFICATION.md](docs/SPECIFICATION.md).
+**Version 0.1.11 — experimental.** Manual wake, power-off and HDMI 1 selection have been confirmed on a real LG TV during development. Suspend/resume automation on a physical Deck is still under investigation. The original requirements and hardware acceptance checklist remain in [docs/SPECIFICATION.md](docs/SPECIFICATION.md).
 
 ## Install and configure
 
-1. Install Decky Loader, then install `out/lg-tv-control-v0.1.10.zip` through **Decky settings → Developer → Install Plugin from ZIP File**. The ZIP includes Python dependencies; do not run pip on the Deck.
+1. Install Decky Loader, then install `out/lg-tv-control-v0.1.11.zip` through **Decky settings → Developer → Install Plugin from ZIP File**. The ZIP includes Python dependencies; do not run pip on the Deck.
 2. Alternatively, extract its single `lg-tv-control` folder into `~/homebrew/plugins/` in Desktop Mode and reload Decky. Avoid nesting it inside another folder with the same name.
 3. Enable network control/LG Connect Apps and network wake on the TV. Settings such as **TV On With Mobile** or **Turn on via Wi-Fi** vary by model. Put the TV and Deck on a reachable LAN without client isolation.
 4. Open **LG TV Control → Find TVs on the network**, then select an address in the list. Cancel leaves the current address unchanged. Closing the dialog restores the Decky panel and preserves your fields. You can also enter an IPv4 address or hostname manually.
@@ -65,6 +65,8 @@ HDMI switching requests the webOS `LAUNCH` permission. The test TV returned `401
 
 If power-off times out while reading the active input, first check **Steam sleep event**. **Registered** confirms the callback was installed; **Last suspend** starts with `Steam request:` if its RPC reached the backend first, or `systemd-logind:` if the system signal arrived first. This distinguishes a missing/late Steam notification from a TV read or network timing failure. Increasing the resume timeout does not change the suspend deadline. A manual **Test connection** while awake can check input-query access independently.
 
+Sleep-event discovery checks both the loader window and Decky's SP window, retrying every two seconds if the native bridge or event is not ready. Registration status is resent so a transient backend startup failure cannot leave a working listener marked unavailable. The status detail distinguishes a missing Steam System API, a missing `RegisterForOnSuspendRequest` method, a registration failure, an unsupported registration handle and no frontend report received. Function, object and asynchronous cleanup handles are supported. A missing cleanup handle is not reported as registered until an event is actually received, and does not cause repeated listener registration. If the Steam client does not expose the event in either window, the plugin cannot guarantee network controls during suspend; the logind fallback remains bounded and fails safely. Share the exact detail under **Steam sleep event** before changing system settings.
+
 ## Settings and credentials
 
 Settings and the pairing key are stored atomically in `DECKY_PLUGIN_SETTINGS_DIR/config.json`, normally `~/homebrew/settings/lg-tv-control/config.json`, with mode `0600`. The key is not returned to the frontend or written to logs. It is not encrypted at rest; processes running as your user can read it.
@@ -115,7 +117,7 @@ pnpm build
 python scripts/package.py
 ```
 
-Without Corepack, replace `pnpm` with `npx --yes pnpm@9.15.9`. The packager downloads pinned Python wheels from `requirements.txt`, preserves dependency licenses/metadata in `py_modules/` and creates `out/lg-tv-control-v0.1.10.zip`. Network access is needed during dependency installation/build. The ZIP has a single `lg-tv-control/` folder containing metadata, `main.py`, `dist/index.js`, backend code, dependencies and the license.
+Without Corepack, replace `pnpm` with `npx --yes pnpm@9.15.9`. The packager downloads pinned Python wheels from `requirements.txt`, preserves dependency licenses/metadata in `py_modules/` and creates `out/lg-tv-control-v0.1.11.zip`. Network access is needed during dependency installation/build. The ZIP has a single `lg-tv-control/` folder containing metadata, `main.py`, `dist/index.js`, backend code, dependencies and the license.
 
 CI runs type checks, backend/protocol tests, browser and Decky builds, and packaging. Tests exercise display gates, credentials, SSAP commands, Wake-on-LAN, logind signals and inhibitor cleanup. When dbus-daemon is installed, an isolated real bus also tests Unix file descriptor passing. The pinned dbus-next 0.2.3 bundle has a small compatibility patch: XML imports and their type annotations are deferred until XML introspection is requested. The raw D-Bus calls used by this plugin do not require XML, which some frozen Decky runtimes omit. The patch is applied by `scripts/bundle_dependencies.py`, preserves dependency licenses, and is checked against the pinned source. Packaging validates dependency imports with host site-packages and XML disabled. Integration tests repeat real D-Bus calls, FD passing and sleep signals in that isolated environment; a bootstrap test also checks renamed install folders. Tests do not replace physical hardware validation. Store publication requires the Decky submission/review process.
 

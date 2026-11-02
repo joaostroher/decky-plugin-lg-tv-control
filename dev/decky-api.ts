@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 
 export function callable<Arguments extends unknown[], Result>(method: string) {
   return async (...args: Arguments): Promise<Result> => {
+    // Local development never registers native Steam sleep automation.
+    if (method === "set_steam_suspend_hook") return { ok: false } as Result;
     const response = await fetch(`/rpc/${method}`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(args),
     });
